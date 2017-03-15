@@ -10,9 +10,9 @@ It will do the following things:
 4. Locate or create a subscription to the API `API_ID` with the plan `PLAN_ID`
 5. Upsert (create or update) a secret inside Kubernetes in the namespace `NAMESPACE` with the name `SECRET_NAME`
 
-The secret will contain two string keys, `client_id` and `client_secret`, which in turn can be used inside pod definitions to retrieve credentials to an application:
+The secret will contain two string keys, `client_id` and `client_secret`, which in turn can be used inside pod definitions to retrieve credentials to an application. This is how you can use credentials created in case you have an OAuth2 secured API:
 
-```
+```yml
 # ....
     spec:
       containers:
@@ -30,6 +30,23 @@ The secret will contain two string keys, `client_id` and `client_secret`, which 
             secretKeyRef:
               name: secret-name
               key: client_secret
+```
+
+In case your API is secured by an API key, you will find the API Key in `key: apikey`:
+
+```yml
+# ....
+    spec:
+      containers:
+      - name: your-container
+        image: yourorg/your-container:latest
+        env:
+        # ...
+        - name: API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: secret-name
+              key: api_key
 ```
 
 ## Usage

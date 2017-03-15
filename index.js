@@ -220,12 +220,22 @@ function deleteKubernetesSecretIfPresent(getUrl, callback) {
 }
 
 function createKubernetesSecret(subscription, secretUrl, callback) {
+    let stringData = {};
+    if (subscription.clientId && subscription.clientSecret) {
+        stringData.client_id = subscription.clientId;
+        stringData.client_secret = subscription.clientSecret;
+    } else if (subscription.apikey) {
+        stringData.api_key = subscription.apikey;
+    } else {
+        // wtf?
+        const errorMessage = 'Subscription does not contain neither client_id and client_secret nor apikey';
+        console.error(errorMessage + ':');
+        console.error(JSON.stringify(subscription));
+        return callback(new Error(errorMessage));
+    }
     kubernetesPost(secretUrl, {
         metadata: { name: SECRET_NAME },
-        stringData: {
-            client_id: subscription.clientId,
-            client_secret: subscription.clientSecret
-        }
+        stringData: stringData
     }, callback);
 }
 
