@@ -84,6 +84,12 @@ async.waterfall([
 ], function (err, kubernetesResult) {
     if (err) {
         console.error('ERROR: Initialization failed.');
+        if (err.statusCode)
+            console.error('Status code: ' + err.statusCode);
+        if (err.body) {
+            console.error('Error body:');
+            console.error(err.body);
+        }
         throw err;
     }
     console.log('INFO: Successfully finished.');
@@ -139,6 +145,7 @@ function createSubscriptionIfNotPresent(subsList, appId, apiId, callback) {
     }, function (err, newSubs) {
         if (err) {
             console.error('ERROR: Creating subscription failed.');
+            console.error(err);
             return callback(err);
         }
         return callback(null, newSubs);
