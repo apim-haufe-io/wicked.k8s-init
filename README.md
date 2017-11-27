@@ -55,6 +55,8 @@ Use `haufelexware/wicked.k8s-init:latest` either as an [Init Container](https://
 
 ### Sample init container configuration
 
+Pre Kubernetes 1.6 (<= 1.5):
+
 ```yml
 apiVersion: v1
 kind: Pod
@@ -101,6 +103,39 @@ spec:
     image: busybox
     command: ['sh', '-c', 'echo The app is running! && sleep 3600']
 ```
+
+Kubernetes 1.6 or later (recommended):
+
+```yml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: myapp-pod
+  labels:
+    app: myapp
+spec:
+  initContainers:
+  - name: wicked-init
+    images: haufelexware/wicked.k8s-init:latest
+    env:
+    - name: APP_ID
+      value: wicked-app-id
+    - name: API_ID
+      value: some-api
+    - name: PLAN_ID
+      value: unlimited
+    - name: NAMESPACE
+      value: default
+    - name: REDIRECT_URI
+      value: "https://uri.of.your.app.com/callback"
+    - name: SECRET_NAME
+      value: wicked-client-creds
+  containers:
+  - name: myapp-container
+    image: busybox
+    command: ['sh', '-c', 'echo The app is running! && sleep 3600']
+```
+
 
 ## Parameters
 
