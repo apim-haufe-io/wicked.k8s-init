@@ -16,6 +16,8 @@ echo "============================================"
 echo "Building normal image (which is alpine)..."
 echo "============================================"
 
+git log -1 --decorate=short > ./git_last_commit
+git rev-parse --abbrev-ref HEAD > ./git_branch
 docker build --pull -t ${DOCKER_PREFIX}k8s-init:${DOCKER_TAG} .
 
 if [ "$1" = "--push" ]; then
