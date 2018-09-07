@@ -95,9 +95,10 @@ async.series({
         if (err) {
             console.error('ERROR: Upserting Kubernetes Secret failed.');
             console.error(err);
-        };
+            throw err;
+        }
         console.log('INFO: Successfully finished.');
-    })
+    });
 });
 
 function initWicked(wickedOptions, callback) {
