@@ -73,15 +73,12 @@ const wickedOptions = {
     doNotPollConfigHash: true
 };
 
-async.waterfall([
-    callback => initWicked(wickedOptions, callback),
-    (nothing, callback) => wicked.initMachineUser(USER_AGENT, callback),
-    (userInfo, callback) => getApplication(APP_ID, callback),
-    (appInfo, callback) => createAppIfNotPresent(appInfo, APP_ID, REDIRECT_URI, callback),
-    (appInfo, callback) => getSubscriptions(callback),
-    (subscriptions, callback) => createSubscriptionIfNotPresent(subscriptions, APP_ID, API_ID, callback),
-    (subs, callback) => upsertKubernetesSecret(subs, callback)
-], function (err, kubernetesResult) {
+async.series({
+    init: callback => initWicked(wickedOptions, callback),
+    initMachine: callback => wicked.initMachineUser(USER_AGENT, callback),
+    createApp: callback => createAppIfNotPresent(APP_ID, REDIRECT_URI, callback),
+    createSubs: callback => createSubscriptionIfNotPresent(APP_ID, API_ID, callback),
+}, function (err, results) {
     if (err) {
         console.error('ERROR: Initialization failed.');
         if (err.statusCode)
@@ -92,7 +89,15 @@ async.waterfall([
         }
         throw err;
     }
-    console.log('INFO: Successfully finished.');
+
+    const subscription = results.createSubs;
+    upsertKubernetesSecret(subscription, function (err) {
+        if (err) {
+            console.error('ERROR: Upserting Kubernetes Secret failed.');
+            console.error(err);
+        };
+        console.log('INFO: Successfully finished.');
+    })
 });
 
 function initWicked(wickedOptions, callback) {
@@ -109,50 +114,58 @@ function getApplication(appId, callback) {
     });
 }
 
-function createAppIfNotPresent(currentAppInfo, appName, redirectUri, callback) {
+function createAppIfNotPresent(appId, redirectUri, callback) {
     console.log('Create application if not present');
-    if (currentAppInfo) {
-        console.log('Application is present');
-        return callback(null, true);
-    }
-    console.log('Creating application');
-    wicked.createApplication({
-        id: appName,
-        name: appName + ' (auto generated)',
-        redirectUri: redirectUri
-    }, function (err, appInfo) {
-        if (err) {
-            console.error('ERROR: Creating application failed');
+    wicked.getApplication(appId, function (err, appInfo) {
+        if (err && err.statusCode === 404) {
+            // App not present, fine
+            appInfo = null; // This will already be the case.
+        } else if (err) {
             return callback(err);
         }
-        callback(null, appInfo);
+        if (appInfo) {
+            console.log('Application is present');
+            // Nothing to do
+            return callback(null);
+        }
+        console.log('Creating application');
+        wicked.createApplication({
+            id: appId,
+            name: appId + ' (auto generated)',
+            redirectUri: redirectUri
+        }, function (err, appInfo) {
+            if (err) {
+                console.error('ERROR: Creating application failed');
+                return callback(err);
+            }
+            callback(null);
+        });
     });
 }
 
-function getSubscriptions(callback) {
-    console.log('Get subscriptions');
-    wicked.getSubscriptions(APP_ID, callback);
-}
-
-function createSubscriptionIfNotPresent(subsList, appId, apiId, callback) {
+function createSubscriptionIfNotPresent(appId, apiId, callback) {
     console.log('Create subscription if not present');
-    const subs = subsList.find(s => s.api === apiId);
-    if (subs) {
-        console.log('Subscription is present');
-        return callback(null, subs);
-    }
-    console.log('Creating subscription');
-    wicked.createSubscription(appId, {
-        application: appId,
-        api: apiId,
-        plan: PLAN_ID
-    }, function (err, newSubs) {
-        if (err) {
-            console.error('ERROR: Creating subscription failed.');
-            console.error(err);
+    wicked.getSubscriptions(appId, function (err, subsList) {
+        if (err)
             return callback(err);
+        const subs = subsList.find(s => s.api === apiId);
+        if (subs) {
+            console.log('Subscription is present');
+            return callback(null, subs);
         }
-        return callback(null, newSubs);
+        console.log('Creating subscription');
+        wicked.createSubscription(appId, {
+            application: appId,
+            api: apiId,
+            plan: PLAN_ID
+        }, function (err, newSubs) {
+            if (err) {
+                console.error('ERROR: Creating subscription failed.');
+                console.error(err);
+                return callback(err);
+            }
+            return callback(null, newSubs);
+        });
     });
 }
 
