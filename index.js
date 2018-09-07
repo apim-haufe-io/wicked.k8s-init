@@ -76,8 +76,8 @@ const wickedOptions = {
 async.waterfall([
     callback => initWicked(wickedOptions, callback),
     (nothing, callback) => wicked.initMachineUser(USER_AGENT, callback),
-    (userInfo, callback) => getApplications(callback),
-    (apps, callback) => createAppIfNotPresent(apps, APP_ID, REDIRECT_URI, callback),
+    (userInfo, callback) => getApplication(APP_ID, callback),
+    (appInfo, callback) => createAppIfNotPresent(appInfo, APP_ID, REDIRECT_URI, callback),
     (appInfo, callback) => getSubscriptions(callback),
     (subscriptions, callback) => createSubscriptionIfNotPresent(subscriptions, APP_ID, API_ID, callback),
     (subs, callback) => upsertKubernetesSecret(subs, callback)
@@ -100,19 +100,23 @@ function initWicked(wickedOptions, callback) {
     wicked.initialize(wickedOptions, callback);
 }
 
-function getApplications(callback) {
+function getApplication(appId, callback) {
     console.log('Get applications');
-    wicked.apiGet('applications', callback);
+    wicked.getApplication(appId, function (err, appInfo) {
+        if (err && err.statusCode === 404)
+            return callback(null, null);
+        return callback(null, appInfo);
+    });
 }
 
-function createAppIfNotPresent(appList, appName, redirectUri, callback) {
+function createAppIfNotPresent(currentAppInfo, appName, redirectUri, callback) {
     console.log('Create application if not present');
-    if (appList.find(item => item.id === appName)) {
+    if (currentAppInfo) {
         console.log('Application is present');
         return callback(null, true);
     }
     console.log('Creating application');
-    wicked.apiPost('applications', {
+    wicked.createApplication({
         id: appName,
         name: appName + ' (auto generated)',
         redirectUri: redirectUri
@@ -127,7 +131,7 @@ function createAppIfNotPresent(appList, appName, redirectUri, callback) {
 
 function getSubscriptions(callback) {
     console.log('Get subscriptions');
-    wicked.apiGet('applications/' + APP_ID + '/subscriptions', callback);
+    wicked.getSubscriptions(APP_ID, callback);
 }
 
 function createSubscriptionIfNotPresent(subsList, appId, apiId, callback) {
@@ -138,7 +142,7 @@ function createSubscriptionIfNotPresent(subsList, appId, apiId, callback) {
         return callback(null, subs);
     }
     console.log('Creating subscription');
-    wicked.apiPost('applications/' + appId + '/subscriptions', {
+    wicked.createSubscription(appId, {
         application: appId,
         api: apiId,
         plan: PLAN_ID
