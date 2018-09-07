@@ -5,7 +5,6 @@ WORKDIR /usr/src/app
 USER node
 COPY package.json /usr/src/app
 COPY wicked-sdk.tgz /usr/src/app
-RUN ls -la
 RUN npm install
 COPY . /usr/src/app
 
