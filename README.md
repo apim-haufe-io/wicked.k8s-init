@@ -6,7 +6,7 @@ It will do the following things:
 
 1. Initialize the wicked SDK and check there's a [Portal API](https://github.com/Haufe-Lexware/wicked.portal-api) instance to talk to
 2. Locate or create a machine user called `auto-deploy`; machine users are always administrators internally
-3. Locate or create a wicked application with the name `APP_ID`
+3. Locate or create a wicked application with the name `APP_ID` and the specified `CLIENT_TYPE`
 4. Locate or create a subscription to the API `API_ID` with the plan `PLAN_ID`
 5. Upsert (create or update) a secret inside Kubernetes in the namespace `NAMESPACE` with the name `SECRET_NAME`
 
@@ -124,6 +124,8 @@ spec:
       value: some-api
     - name: PLAN_ID
       value: unlimited
+    - name: CLIENT_TYPE
+      value: confidential
     - name: NAMESPACE
       value: default
     - name: REDIRECT_URI
@@ -146,6 +148,7 @@ Env var | Default | Description
 `APP_ID` | `app-id` | The application ID in the wicked portal to be created
 `API_ID` | `api-id` | The API ID of the API to create a subscription for
 `PLAN_ID` | `unlimited` | The plan ID to use for the subscription
+`CLIENT_TYPE` | `public_spa` | The client type; one of `public_spa`, `public_native` or `confidential`
 `SECRET_NAME` | `some-secret` | The name of the kubernetes secret to create (retrieve with `kubectl get secret some-secret`)
 `NAMESPACE`| `default` | The Kubernetes namespace to create the secret for
 `PORTAL_API_URL` | `http://portal-api:3001` | If wicked runs in a different location, specify this env var; note that the portal API must be accessible directly via http!

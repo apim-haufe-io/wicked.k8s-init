@@ -13,6 +13,7 @@ const TOKEN_FILE = '/var/run/secrets/kubernetes.io/serviceaccount/token';
 let APP_ID = 'app-id';
 let API_ID = 'api-id';
 let PLAN_ID = 'unlimited';
+let CLIENT_TYPE = wicked.WickedClientType.Public_SPA;
 let SECRET_NAME = 'some-secret';
 let NAMESPACE = 'default';
 
@@ -48,9 +49,10 @@ if (process.env.API_ID)
     API_ID = process.env.API_ID;
 if (process.env.PLAN_ID)
     PLAN_ID = process.env.PLAN_ID;
+if (process.env.CLIENT_TYPE)
+    CLIENT_TYPE = process.env.CLIENT_TYPE;
 if (process.env.SECRET_NAME)
     SECRET_NAME = process.env.SECRET_NAME;
-
 
 const REDIRECT_URI = process.env.REDIRECT_URI;
 const TOKEN = fs.readFileSync(TOKEN_FILE, 'utf8');
@@ -59,6 +61,7 @@ console.log('Using k8s Namespace: ' + NAMESPACE);
 console.log('Using App ID:        ' + APP_ID);
 console.log('Using API ID:        ' + API_ID);
 console.log('Using Plan ID:       ' + PLAN_ID);
+console.log('Using Client Type:   ' + CLIENT_TYPE);
 console.log('Using Secret Name:   ' + SECRET_NAME);
 console.log('Using Redirect URI:  ' + REDIRECT_URI);
 
@@ -76,7 +79,7 @@ const wickedOptions = {
 async.series({
     init: callback => initWicked(wickedOptions, callback),
     initMachine: callback => wicked.initMachineUser(USER_AGENT, callback),
-    createApp: callback => createAppIfNotPresent(APP_ID, REDIRECT_URI, callback),
+    createApp: callback => createAppIfNotPresent(APP_ID, REDIRECT_URI, CLIENT_TYPE, callback),
     createSubs: callback => createSubscriptionIfNotPresent(APP_ID, API_ID, callback),
 }, function (err, results) {
     if (err) {
@@ -115,7 +118,7 @@ function getApplication(appId, callback) {
     });
 }
 
-function createAppIfNotPresent(appId, redirectUri, callback) {
+function createAppIfNotPresent(appId, redirectUri, clientType, callback) {
     console.log('Create application if not present');
     wicked.getApplication(appId, function (err, appInfo) {
         if (err && err.statusCode === 404) {
@@ -133,6 +136,7 @@ function createAppIfNotPresent(appId, redirectUri, callback) {
         wicked.createApplication({
             id: appId,
             name: appId + ' (auto generated)',
+            clientType: clientType,
             redirectUri: redirectUri
         }, function (err, appInfo) {
             if (err) {
