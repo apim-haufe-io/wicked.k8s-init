@@ -1,12 +1,18 @@
 'use strict';
 
-const async = require('async');
+/* global __dirname */
+
 const fs = require('fs');
 const path = require('path');
-const request = require('request');
+const axios = require('axios');
 const wicked = require('wicked-sdk');
 const https = require('https');
 const kubernetesAgent = new https.Agent({ rejectUnauthorized: false });
+
+function getDate() { return new Date().toISOString(); }
+function info(s) { console.log(`[${getDate()}] INFO - ${s}`); }
+function warn(s) { console.log(`[${getDate()}] WARN - ${s}`); }
+function error(s) { console.error(`[${getDate()}] ERROR - ${s}`); }
 
 const TOKEN_FILE = '/var/run/secrets/kubernetes.io/serviceaccount/token';
 
@@ -19,51 +25,60 @@ let NAMESPACE = 'default';
 
 let initSuccess = true;
 
-if (!process.env.KUBERNETES_SERVICE_HOST) {
-    console.error('ERROR: KUBERNETES_SERVICE_HOST is not set.');
-    initSuccess = false;
+let TOKEN;
+if (!process.env.IGNORE_K8S) {
+    if (!process.env.KUBERNETES_SERVICE_HOST) {
+        error('KUBERNETES_SERVICE_HOST is not set.');
+        initSuccess = false;
+    }
+    if (!process.env.KUBERNETES_SERVICE_PORT) {
+        error('KUBERNETES_SERVICE_PORT is not set.');
+        initSuccess = false;
+    }
+    if (!fs.existsSync(TOKEN_FILE)) {
+        error('File ' + TOKEN_FILE + ' does not exist.');
+        initSuccess = false;
+    } else {
+        TOKEN = fs.readFileSync(TOKEN_FILE, 'utf8');
+    }
 }
-if (!process.env.KUBERNETES_SERVICE_PORT) {
-    console.error('ERROR: KUBERNETES_SERVICE_PORT is not set.');
-    initSuccess = false;
-}
-if (!fs.existsSync(TOKEN_FILE)) {
-    console.error('ERROR: File ' + TOKEN_FILE + ' does not exist.');
-    initSuccess = false;
-}
-
 if (!process.env.REDIRECT_URI) {
-    console.error('ERROR: REDIRECT_URI is not set.');
+    error('REDIRECT_URI is not set.');
     initSuccess = false;
 }
 if (!initSuccess) {
-    console.error('Not successful, exiting.');
+    error('Not successful, exiting.');
     process.exit(1);
 }
 
-if (process.env.NAMESPACE)
+if (process.env.NAMESPACE) {
     NAMESPACE = process.env.NAMESPACE;
-if (process.env.APP_ID)
+}
+if (process.env.APP_ID) {
     APP_ID = process.env.APP_ID;
-if (process.env.API_ID)
+}
+if (process.env.API_ID) {
     API_ID = process.env.API_ID;
-if (process.env.PLAN_ID)
+}
+if (process.env.PLAN_ID) {
     PLAN_ID = process.env.PLAN_ID;
-if (process.env.CLIENT_TYPE)
+}
+if (process.env.CLIENT_TYPE) {
     CLIENT_TYPE = process.env.CLIENT_TYPE;
-if (process.env.SECRET_NAME)
+}
+if (process.env.SECRET_NAME) {
     SECRET_NAME = process.env.SECRET_NAME;
+}
 
-const REDIRECT_URI = process.env.REDIRECT_URI;
-const TOKEN = fs.readFileSync(TOKEN_FILE, 'utf8');
+const REDIRECT_URIS = process.env.REDIRECT_URI.split('|');
 
-console.log('Using k8s Namespace: ' + NAMESPACE);
-console.log('Using App ID:        ' + APP_ID);
-console.log('Using API ID:        ' + API_ID);
-console.log('Using Plan ID:       ' + PLAN_ID);
-console.log('Using Client Type:   ' + CLIENT_TYPE);
-console.log('Using Secret Name:   ' + SECRET_NAME);
-console.log('Using Redirect URI:  ' + REDIRECT_URI);
+info('Using k8s Namespace: ' + NAMESPACE);
+info('Using App ID:        ' + APP_ID);
+info('Using API ID:        ' + API_ID);
+info('Using Plan ID:       ' + PLAN_ID);
+info('Using Client Type:   ' + CLIENT_TYPE);
+info('Using Secret Name:   ' + SECRET_NAME);
+info('Using Redirect URIs:  ' + REDIRECT_URIS);
 
 const KUBERNETES_API = 'https://' + process.env.KUBERNETES_SERVICE_HOST +
     ':' + process.env.KUBERNETES_SERVICE_PORT + '/api/v1/';
@@ -76,101 +91,94 @@ const wickedOptions = {
     doNotPollConfigHash: true
 };
 
-async.series({
-    init: callback => initWicked(wickedOptions, callback),
-    initMachine: callback => wicked.initMachineUser(USER_AGENT, callback),
-    createApp: callback => createAppIfNotPresent(APP_ID, REDIRECT_URI, CLIENT_TYPE, callback),
-    createSubs: callback => createSubscriptionIfNotPresent(APP_ID, API_ID, callback),
-}, function (err, results) {
-    if (err) {
-        console.error('ERROR: Initialization failed.');
-        if (err.statusCode)
-            console.error('Status code: ' + err.statusCode);
-        if (err.body) {
-            console.error('Error body:');
-            console.error(err.body);
+(async () => {
+    try {
+        await initWicked(wickedOptions);
+        await wicked.initMachineUser(USER_AGENT);
+        await createAppIfNotPresent(APP_ID, REDIRECT_URIS, CLIENT_TYPE);
+        const subscription = await createSubscriptionIfNotPresent(APP_ID, API_ID);
+        if (!process.env.IGNORE_K8S) {
+            await upsertKubernetesSecret(subscription);
+        } else {
+            warn('Detected env var IGNORE_K8S - not upserting Kubernetes secret.');
         }
-        throw err;
+        info('Successfully created or checked application/subscription.');
+        process.exit(0);
+    } catch (err) {
+        error('Initialization failed.');
+        if (err.statusCode) {
+            error('Status code: ' + err.statusCode);
+        }
+        if (err.body) {
+            error('Error body:');
+            error(JSON.stringify(err.body));
+        }
+        process.exit(1);
     }
+})();
 
-    const subscription = results.createSubs;
-    upsertKubernetesSecret(subscription, function (err) {
-        if (err) {
-            console.error('ERROR: Upserting Kubernetes Secret failed.');
-            console.error(err);
+async function initWicked(wickedOptions) {
+    info('Initializing wicked.');
+    await wicked.initialize(wickedOptions);
+}
+
+async function createAppIfNotPresent(appId, redirectUris, clientType) {
+    info('Create application if not present');
+    let appInfo = null;
+    try {
+        appInfo = await wicked.getApplication(appId);
+    } catch (err) {
+        if (err.statusCode !== 404) {
             throw err;
         }
-        console.log('INFO: Successfully finished.');
-    });
-});
-
-function initWicked(wickedOptions, callback) {
-    console.log('Initializing wicked.');
-    wicked.initialize(wickedOptions, callback);
-}
-
-function getApplication(appId, callback) {
-    console.log('Get applications');
-    wicked.getApplication(appId, function (err, appInfo) {
-        if (err && err.statusCode === 404)
-            return callback(null, null);
-        return callback(null, appInfo);
-    });
-}
-
-function createAppIfNotPresent(appId, redirectUri, clientType, callback) {
-    console.log('Create application if not present');
-    wicked.getApplication(appId, function (err, appInfo) {
-        if (err && err.statusCode === 404) {
-            // App not present, fine
-            appInfo = null; // This will already be the case.
-        } else if (err) {
-            return callback(err);
+        // App not present, fine; we have status 404
+    }
+    if (appInfo) {
+        info('Application is already present.');
+        // Check whether name and redirect URIs match
+        const presentUris = appInfo.redirectUris.join('|');
+        const newUris = redirectUris.join('|');
+        if (presentUris !== newUris
+            || appInfo.clientType !== clientType) {
+            info('** Application has changed, patching...');
+            await wicked.patchApplication(appId, {
+                id: appId,
+                clientType,
+                redirectUris
+            });
+        } else {
+            info('Application does not need patch.');
         }
-        if (appInfo) {
-            console.log('Application is present');
-            // Nothing to do
-            return callback(null);
-        }
-        console.log('Creating application');
-        wicked.createApplication({
+    } else {
+        info('Creating application...');
+        await wicked.createApplication({
             id: appId,
             name: appId + ' (auto generated)',
             clientType: clientType,
-            redirectUri: redirectUri
-        }, function (err, appInfo) {
-            if (err) {
-                console.error('ERROR: Creating application failed');
-                return callback(err);
-            }
-            callback(null);
+            redirectUris: redirectUris
         });
-    });
+    }
 }
 
-function createSubscriptionIfNotPresent(appId, apiId, callback) {
-    console.log('Create subscription if not present');
-    wicked.getSubscriptions(appId, function (err, subsList) {
-        if (err)
-            return callback(err);
-        const subs = subsList.find(s => s.api === apiId);
-        if (subs) {
-            console.log('Subscription is present');
-            return callback(null, subs);
+async function createSubscriptionIfNotPresent(appId, apiId) {
+    info('Creating subscription if not present...');
+    const subsList = await wicked.getSubscriptions(appId);
+    const subs = subsList.find(s => s.api === apiId);
+    if (subs) {
+        info('Subscription is present.');
+        if (subs.plan !== PLAN_ID) {
+            info('** Plan ID has changed, deleting...');
+            await wicked.deleteSubscription(appId, apiId);
+        } else {
+            info('Subscription is correct, not changing.');
+            return subs;
         }
-        console.log('Creating subscription');
-        wicked.createSubscription(appId, {
-            application: appId,
-            api: apiId,
-            plan: PLAN_ID
-        }, function (err, newSubs) {
-            if (err) {
-                console.error('ERROR: Creating subscription failed.');
-                console.error(err);
-                return callback(err);
-            }
-            return callback(null, newSubs);
-        });
+    }
+    info('Creating subscription...');
+    return await wicked.createSubscription(appId, {
+        application: appId,
+        api: apiId,
+        plan: PLAN_ID
     });
 }
 
@@ -180,9 +188,9 @@ function urlCombine(p1, p2) {
     return pp1 + '/' + pp2;
 }
 
-function kubernetesAction(endpoint, method, body, callback) {
+async function kubernetesAction(endpoint, method, body) {
     const uri = urlCombine(KUBERNETES_API, endpoint);
-    console.log("Kubernetes: " + method + " " + uri);
+    info("Kubernetes: " + method + " " + uri);
     const req = {
         uri: uri,
         method: method,
@@ -190,65 +198,52 @@ function kubernetesAction(endpoint, method, body, callback) {
             'Authorization': 'Bearer ' + TOKEN,
             'Accept': 'application/json'
         },
-        agent: kubernetesAgent
+        httpsAgent: kubernetesAgent
     };
     if (body) {
-        req.json = true;
-        req.body = body;
+        req.data = body;
     }
-    request(req, function (err, apiResult, apiBody) {
-        if (err) {
-            console.error('ERROR: Call "' + method + '" to "' + endpoint + '" failed.');
-            console.error(err);
-            return callback(err);
-        }
-        if (method === 'GET' && apiResult.statusCode === 404) {
+
+    try {
+        const res = await axios(req);
+        return res.data;
+    } catch (err) {
+        if (method === 'GET' && err.response && err.response.status === 404) {
             // Special treatment for 404
-            return callback(null, null);
+            return null;
         }
-        const jsonBody = getJson(apiBody);
-        if (apiResult.statusCode >= 400) {
-            // Translate status code to error
-            const err = new Error(JSON.stringify(jsonBody));
-            return callback(err);
-        }
-        return callback(null, jsonBody);
-    });
+        throw err;
+    }
 }
 
-function kubernetesGet(endpoint, callback) {
-    kubernetesAction(endpoint, 'GET', null, callback);
+async function kubernetesGet(endpoint) {
+    return await kubernetesAction(endpoint, 'GET', null);
 }
 
-function kubernetesPost(endpoint, body, callback) {
-    kubernetesAction(endpoint, 'POST', body, callback);
+async function kubernetesPost(endpoint, body) {
+    return await kubernetesAction(endpoint, 'POST', body);
 }
 
-function kubernetesDelete(endpoint, callback) {
-    kubernetesAction(endpoint, 'DELETE', null, callback);
+async function kubernetesDelete(endpoint) {
+    return await kubernetesAction(endpoint, 'DELETE', null);
 }
 
-function upsertKubernetesSecret(subscription, callback) {
+async function upsertKubernetesSecret(subscription) {
     const secretUrl = 'namespaces/' + NAMESPACE + '/secrets';
     const secretGetUrl = urlCombine(secretUrl, SECRET_NAME);
-    async.series([
-        callback => deleteKubernetesSecretIfPresent(secretGetUrl, callback),
-        callback => createKubernetesSecret(subscription, secretUrl, callback)
-    ], callback);
+    await deleteKubernetesSecretIfPresent(secretGetUrl);
+    await createKubernetesSecret(subscription, secretUrl);
+    return;
 }
 
-function deleteKubernetesSecretIfPresent(getUrl, callback) {
-    kubernetesGet(getUrl, function (err, data) {
-        if (err)
-            return callback(err);
-        if (data)
-            return kubernetesDelete(getUrl, callback);
-        // Not present
-        return callback(null);
-    });
+async function deleteKubernetesSecretIfPresent(getUrl) {
+    const secret = await kubernetesGet(getUrl);
+    if (secret) {
+        return await kubernetesDelete(getUrl);
+    }
 }
 
-function createKubernetesSecret(subscription, secretUrl, callback) {
+async function createKubernetesSecret(subscription, secretUrl) {
     let stringData = {};
     if (subscription.clientId && subscription.clientSecret) {
         stringData.client_id = subscription.clientId;
@@ -258,24 +253,14 @@ function createKubernetesSecret(subscription, secretUrl, callback) {
     } else {
         // wtf?
         const errorMessage = 'Subscription does not contain neither client_id and client_secret nor apikey';
-        console.error(errorMessage + ':');
-        console.error(JSON.stringify(subscription));
-        return callback(new Error(errorMessage));
+        error(errorMessage + ':');
+        error(JSON.stringify(subscription));
+        throw new Error(errorMessage);
     }
-    kubernetesPost(secretUrl, {
+    return await kubernetesPost(secretUrl, {
         metadata: { name: SECRET_NAME },
         stringData: stringData
-    }, callback);
-}
-
-function getJson(ob) {
-    if (ob instanceof String || typeof ob === "string") {
-        ob = ob.trim();
-        if (ob.startsWith('[') || (ob.startsWith('[')))
-            return JSON.parse(ob);
-        return { message: ob };
-    }
-    return ob;
+    });
 }
 
 function getVersion() {
@@ -283,12 +268,13 @@ function getVersion() {
     if (fs.existsSync(packageFile)) {
         try {
             const packageInfo = JSON.parse(fs.readFileSync(packageFile, 'utf8'));
-            if (packageInfo.version)
+            if (packageInfo.version) {
                 return packageInfo.version;
+            }
         } catch (ex) {
-            console.error(ex);
+            error(ex);
         }
     }
-    console.error("WARNING: Could not retrieve package version, returning 0.0.0.");
+    warn("Could not retrieve package version, returning 0.0.0.");
     return "0.0.0";
 }

@@ -14,8 +14,7 @@
   "license": "Apache-2.0",
   "homepage": "https://github.com/Haufe-Lexware/wicked.k8s-init",
   "dependencies": {
-    "async": "2.1.5",
-    "request": "2.88.0",
+    "axios": "0.18.0",
     "wicked-sdk": "file:wicked-sdk.tgz"
   },
   "jshintConfig": {

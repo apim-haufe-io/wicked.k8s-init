@@ -149,6 +149,7 @@ Env var | Default | Description
 `API_ID` | `api-id` | The API ID of the API to create a subscription for
 `PLAN_ID` | `unlimited` | The plan ID to use for the subscription
 `CLIENT_TYPE` | `public_spa` | The client type; one of `public_spa`, `public_native` or `confidential`
+`REDIRECT_URI` | -- | The redirect URI of the application; to specify multiple redirect URIs, separate them with a pipe `|` character; e.g. `https://app.yourcompany.com/callback|https://app.yourcompany.com/callback/silent-refresh.html`
 `SECRET_NAME` | `some-secret` | The name of the kubernetes secret to create (retrieve with `kubectl get secret some-secret`)
 `NAMESPACE`| `default` | The Kubernetes namespace to create the secret for
 `PORTAL_API_URL` | `http://portal-api:3001` | If wicked runs in a different location, specify this env var; note that the portal API must be accessible directly via http!
