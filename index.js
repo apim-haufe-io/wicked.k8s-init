@@ -10,6 +10,7 @@ const https = require('https');
 const kubernetesAgent = new https.Agent({ rejectUnauthorized: false });
 
 function getDate() { return new Date().toISOString(); }
+function debug(s) { if (process.env.DEBUG) console.log(`[${getDate()}] DEBUG - ${s}`); } // eslint-disable-line
 function info(s) { console.log(`[${getDate()}] INFO - ${s}`); }
 function warn(s) { console.log(`[${getDate()}] WARN - ${s}`); }
 function error(s) { console.error(`[${getDate()}] ERROR - ${s}`); }
@@ -93,8 +94,12 @@ const wickedOptions = {
 
 (async () => {
     try {
+        debug('Attempting init wicked');
         await initWicked(wickedOptions);
+        debug('Finished init wicked');
+        debug('Attempting init machine user');
         await wicked.initMachineUser(USER_AGENT);
+        debug('Finished init machine user');
         await createAppIfNotPresent(APP_ID, REDIRECT_URIS, CLIENT_TYPE);
         const subscription = await createSubscriptionIfNotPresent(APP_ID, API_ID);
         if (!process.env.IGNORE_K8S) {
@@ -126,12 +131,17 @@ async function createAppIfNotPresent(appId, redirectUris, clientType) {
     info('Create application if not present');
     let appInfo = null;
     try {
+        debug(`Attempting get of application ${appId}`);
         appInfo = await wicked.getApplication(appId);
+        debug(`appInfo: ${JSON.stringify(appInfo)}`);
     } catch (err) {
         if (err.statusCode !== 404) {
+            debug(`Caught err: ${err}`);
+            debug(err.stack);
             throw err;
         }
         // App not present, fine; we have status 404
+        debug(`Application ${appId} was not found.`);
     }
     if (appInfo) {
         info('Application is already present.');
@@ -146,6 +156,7 @@ async function createAppIfNotPresent(appId, redirectUris, clientType) {
                 clientType,
                 redirectUris
             });
+            debug('Patching application finished');
         } else {
             info('Application does not need patch.');
         }
@@ -157,29 +168,35 @@ async function createAppIfNotPresent(appId, redirectUris, clientType) {
             clientType: clientType,
             redirectUris: redirectUris
         });
+        debug('Creating application finished.');
     }
 }
 
 async function createSubscriptionIfNotPresent(appId, apiId) {
     info('Creating subscription if not present...');
+    debug('Attempting get subscriptions');
     const subsList = await wicked.getSubscriptions(appId);
+    debug(`subsList: ${JSON.stringify(subsList)}`);
     const subs = subsList.find(s => s.api === apiId);
     if (subs) {
         info('Subscription is present.');
         if (subs.plan !== PLAN_ID) {
             info('** Plan ID has changed, deleting...');
             await wicked.deleteSubscription(appId, apiId);
+            debug('Subscription delete finished');
         } else {
             info('Subscription is correct, not changing.');
             return subs;
         }
     }
     info('Creating subscription...');
-    return await wicked.createSubscription(appId, {
+    await wicked.createSubscription(appId, {
         application: appId,
         api: apiId,
         plan: PLAN_ID
     });
+    debug('Create subscription finished');
+    return;
 }
 
 function urlCombine(p1, p2) {
@@ -205,13 +222,19 @@ async function kubernetesAction(endpoint, method, body) {
     }
 
     try {
+        debug('Attempting call to Kubernetes.');
         const res = await axios(req);
+        debug('Call finished, data:');
+        debug(JSON.stringify(res.data));
         return res.data;
     } catch (err) {
         if (method === 'GET' && err.response && err.response.status === 404) {
             // Special treatment for 404
+            debug('Caught 404, returning null');
             return null;
         }
+        debug(`Caught axios error: ${err.message}`);
+        debug(err.stack);
         throw err;
     }
 }
@@ -229,21 +252,32 @@ async function kubernetesDelete(endpoint) {
 }
 
 async function upsertKubernetesSecret(subscription) {
+    debug('upsertKubernetesSecret');
     const secretUrl = 'namespaces/' + NAMESPACE + '/secrets';
     const secretGetUrl = urlCombine(secretUrl, SECRET_NAME);
+    debug('Attempting deleteKubernetesSecretIfPresent');
     await deleteKubernetesSecretIfPresent(secretGetUrl);
+    debug('Finished deleteKubernetesSecretIfPresent');
+    debug('Attempting createKubernetesSecret');
     await createKubernetesSecret(subscription, secretUrl);
+    debug('Finished createKubernetesSecret');
     return;
 }
 
 async function deleteKubernetesSecretIfPresent(getUrl) {
+    debug('deleteKubernetesSecretIfPresent');
+    debug(`Attempt kubernetesGet(${getUrl}`);
     const secret = await kubernetesGet(getUrl);
+    debug('kubernetesGet returned.');
     if (secret) {
-        return await kubernetesDelete(getUrl);
+        debug(`Attempt kubernetesDelete(${getUrl})`);
+        await kubernetesDelete(getUrl);
+        debug('kubernetesDelete returned.');
     }
 }
 
 async function createKubernetesSecret(subscription, secretUrl) {
+    debug('createKubernetesSecret()');
     let stringData = {};
     if (subscription.clientId && subscription.clientSecret) {
         stringData.client_id = subscription.clientId;
@@ -257,10 +291,12 @@ async function createKubernetesSecret(subscription, secretUrl) {
         error(JSON.stringify(subscription));
         throw new Error(errorMessage);
     }
-    return await kubernetesPost(secretUrl, {
+    debug(`Attempting POST ${secretUrl}`);
+    await kubernetesPost(secretUrl, {
         metadata: { name: SECRET_NAME },
         stringData: stringData
     });
+    debug(`POST to ${secretUrl} finished`);
 }
 
 function getVersion() {
