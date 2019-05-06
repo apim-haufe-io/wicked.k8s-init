@@ -209,7 +209,7 @@ async function kubernetesAction(endpoint, method, body) {
     const uri = urlCombine(KUBERNETES_API, endpoint);
     info("Kubernetes: " + method + " " + uri);
     const req = {
-        uri: uri,
+        url: uri,
         method: method,
         headers: {
             'Authorization': 'Bearer ' + TOKEN,
